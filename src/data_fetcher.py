@@ -3,6 +3,7 @@ import pandas as pd
 import logging
 import numpy as np
 from cnbc_fetcher import fetch_cnbc_data
+from frankfurter_fetcher import fetch_frankfurter_rates
 
 # Configure logging
 logging.basicConfig(
@@ -50,10 +51,6 @@ CNBC_SYMBOLS = [
     ".KSVKOSPI",  # VKOSPI
     "JP10Y",  # Japan 10Y
     "KR10Y",  # Korea 10Y
-    "KRW=",  # USD/KRW
-    "JPY=",  # USD/JPY
-    "EUR=",  # EUR/USD (Major pair convention)
-    "CNY=",  # USD/CNY
 ]
 
 
@@ -82,11 +79,13 @@ def fetch_all_data():
     logging.info("Fetching CNBC data...")
     cnbc_data = fetch_cnbc_data(CNBC_SYMBOLS)
 
-    # Process Rates from CNBC
-    usd_krw = cnbc_data.get("KRW=", {}).get("price")
-    usd_jpy = cnbc_data.get("JPY=", {}).get("price")
-    eur_usd = cnbc_data.get("EUR=", {}).get("price")
-    usd_cny = cnbc_data.get("CNY=", {}).get("price")
+    # 2. Fetch FX rates from Frankfurter
+    logging.info("Fetching Frankfurter FX data...")
+    fx_data = fetch_frankfurter_rates()
+    usd_krw = fx_data.get("USD/KRW")
+    usd_jpy = fx_data.get("USD/JPY")
+    eur_usd = fx_data.get("EUR/USD")
+    usd_cny = fx_data.get("USD/CNY")
 
     # Helper to create result item
     def create_item(name, price, change, change_pct, history=None, use_blank=False):
@@ -108,11 +107,11 @@ def fetch_all_data():
     # Exchange Rates Calculation
     if usd_krw:
         # USD/KRW
-        # Hybrid: Use CNBC Price, but YF History/Change if available
+        # Hybrid: Use Frankfurter price, but YF History/Change if available
         yf_hist = yf_rates_data.get("USD/KRW")
         price = usd_krw
-        change = cnbc_data["KRW="]["change"]
-        change_pct = cnbc_data["KRW="]["change_pct"]
+        change = 0
+        change_pct = 0
         history = [price]
 
         if yf_hist is not None and not yf_hist.empty:
@@ -128,7 +127,6 @@ def fetch_all_data():
         # JPY/KRW
         if usd_jpy:
             price_jpykrw = (usd_krw / usd_jpy) * 100  # JPY/KRW (100 Yen)
-            # Default CNBC change logic roughly
             change = 0
             change_pct = 0
             history = [price_jpykrw]
@@ -179,7 +177,7 @@ def fetch_all_data():
             )
 
     else:
-        logging.warning("CNBC Rates failed. Data might be incomplete.")
+        logging.warning("Frankfurter FX rates failed. Data might be incomplete.")
 
     # Add other CNBC items (Blank Change/Trend)
     # VKOSPI
@@ -203,7 +201,7 @@ def fetch_all_data():
             create_item("Korea 10Y Treasury", item["price"], 0, 0, use_blank=True)
         )
 
-    # 2. Fetch Yahoo Finance Data
+    # 3. Fetch Yahoo Finance Data
     logging.info("Fetching Yahoo Finance data...")
     for category, items in YF_TICKERS.items():
         for name, ticker in items.items():

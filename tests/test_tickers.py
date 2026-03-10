@@ -13,9 +13,10 @@ logging.basicConfig(
 
 load_dotenv()
 
-# Add src to path to import cnbc_fetcher
+# Add src to path to import project modules
 sys.path.append(os.path.join(os.path.dirname(__file__), "../src"))
 from cnbc_fetcher import fetch_cnbc_data
+from frankfurter_fetcher import fetch_frankfurter_rates
 
 yf_tickers = {
     "S&P 500": "^GSPC",
@@ -31,7 +32,7 @@ yf_tickers = {
     "VIX": "^VIX",
 }
 
-cnbc_symbols = [".KSVKOSPI", "JP10Y", "KR10Y", "KRW=", "JPY=", "EUR=", "CNY="]
+cnbc_symbols = [".KSVKOSPI", "JP10Y", "KR10Y"]
 
 print("--- Testing Yahoo Finance Tickers ---")
 for name, ticker in yf_tickers.items():
@@ -44,11 +45,24 @@ for name, ticker in yf_tickers.items():
     except Exception as e:
         print(f"[ERROR] {name} ({ticker}): {e}")
 
+print("\n--- Testing Frankfurter FX Rates ---")
+
+try:
+    fx_data = fetch_frankfurter_rates()
+    for pair in ["USD/KRW", "USD/JPY", "EUR/USD", "USD/CNY"]:
+        price = fx_data.get(pair)
+        if price:
+            print(f"[OK] {pair}: {price}")
+        else:
+            print(f"[FAIL] {pair}: No data found")
+except Exception as e:
+    print(f"[ERROR] Frankfurter fetch failed: {e}")
+
 print("\n--- Testing CNBC Tickers ---")
 
 key = os.environ.get("RAPIDAPI_CNBC_KEY")
 if not key:
-    print("[WARN] RAPIDAPI_CNBC_KEY not found in env. CNBC tests will fail/skip.")
+    print("[WARN] RAPIDAPI_CNBC_KEY not found in env. CNBC-only tests will fail/skip.")
 
 try:
     cnbc_data = fetch_cnbc_data(cnbc_symbols)
