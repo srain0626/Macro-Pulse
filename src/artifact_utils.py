@@ -1,5 +1,10 @@
-import os
 import tempfile
+from pathlib import Path
+
+from logging_utils import get_logger
+
+
+logger = get_logger(__name__)
 
 
 def create_temp_png_path(prefix):
@@ -17,6 +22,10 @@ def resolve_output_path(output_path, prefix):
 
 def cleanup_files(file_paths):
     for file_path in file_paths:
-        if file_path and os.path.exists(file_path):
-            os.remove(file_path)
-            print(f"Removed temporary file: {file_path}")
+        if not file_path:
+            continue
+
+        path = Path(file_path)
+        if path.exists():
+            path.unlink()
+            logger.info("Removed temporary file: %s", path)

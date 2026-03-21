@@ -29,9 +29,9 @@ class CnbcFetcherTests(unittest.TestCase):
     def test_parse_cnbc_quote_extracts_price_and_daily_change(self):
         quote = cnbc_fetcher.parse_cnbc_quote(SAMPLE_QUOTE_HTML)
 
-        self.assertAlmostEqual(quote["price"], 3.629)
-        self.assertAlmostEqual(quote["change"], -0.112)
-        self.assertAlmostEqual(quote["change_pct"], -2.99)
+        self.assertAlmostEqual(quote.price, 3.629)
+        self.assertAlmostEqual(quote.change, -0.112)
+        self.assertAlmostEqual(quote.change_pct, -2.99)
 
     @patch("cnbc_fetcher.urlopen")
     def test_fetch_cnbc_data_fetches_requested_symbols(self, mock_urlopen):
@@ -44,9 +44,9 @@ class CnbcFetcherTests(unittest.TestCase):
         quotes = cnbc_fetcher.fetch_cnbc_data(["KR10Y"])
 
         self.assertIn("KR10Y", quotes)
-        self.assertAlmostEqual(quotes["KR10Y"]["price"], 3.629)
-        self.assertAlmostEqual(quotes["KR10Y"]["change"], -0.112)
-        self.assertEqual(quotes["KR10Y"]["name"], "Korea 10Y Treasury")
+        self.assertAlmostEqual(quotes["KR10Y"].price, 3.629)
+        self.assertAlmostEqual(quotes["KR10Y"].change, -0.112)
+        self.assertEqual(quotes["KR10Y"].name, "Korea 10Y Treasury")
 
 
 if __name__ == "__main__":

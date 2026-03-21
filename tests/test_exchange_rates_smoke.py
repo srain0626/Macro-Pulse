@@ -21,13 +21,13 @@ def print_live_exchange_snapshot(rates, usd_date, eur_date, usd_url, eur_url):
     print(f"USD response date: {usd_date}")
     print(f"EUR response date: {eur_date}")
     print("Live exchange rates:")
-    print(f"USD/KRW: {rates['USD/KRW']:.4f}")
-    print(f"USD/JPY: {rates['USD/JPY']:.4f}")
-    print(f"EUR/USD: {rates['EUR/USD']:.4f}")
-    print(f"USD/CNY: {rates['USD/CNY']:.4f}")
-    print(f"JPY/KRW (100 JPY): {(rates['USD/KRW'] / rates['USD/JPY']) * 100:.4f}")
-    print(f"EUR/KRW: {rates['USD/KRW'] * rates['EUR/USD']:.4f}")
-    print(f"CNY/KRW: {rates['USD/KRW'] / rates['USD/CNY']:.4f}")
+    print(f"USD/KRW: {rates.usd_krw:.4f}")
+    print(f"USD/JPY: {rates.usd_jpy:.4f}")
+    print(f"EUR/USD: {rates.eur_usd:.4f}")
+    print(f"USD/CNY: {rates.usd_cny:.4f}")
+    print(f"JPY/KRW (100 JPY): {(rates.usd_krw / rates.usd_jpy) * 100:.4f}")
+    print(f"EUR/KRW: {rates.usd_krw * rates.eur_usd:.4f}")
+    print(f"CNY/KRW: {rates.usd_krw / rates.usd_cny:.4f}")
 
 
 @unittest.skipUnless(
@@ -58,10 +58,10 @@ class FrankfurterSmokeTests(unittest.TestCase):
 
         mapped_rates = fetch_frankfurter_rates()
 
-        self.assertAlmostEqual(mapped_rates["USD/KRW"], usd_rates["KRW"])
-        self.assertAlmostEqual(mapped_rates["USD/JPY"], usd_rates["JPY"])
-        self.assertAlmostEqual(mapped_rates["USD/CNY"], usd_rates["CNY"])
-        self.assertAlmostEqual(mapped_rates["EUR/USD"], eur_rates["USD"])
+        self.assertAlmostEqual(mapped_rates.usd_krw, usd_rates["KRW"])
+        self.assertAlmostEqual(mapped_rates.usd_jpy, usd_rates["JPY"])
+        self.assertAlmostEqual(mapped_rates.usd_cny, usd_rates["CNY"])
+        self.assertAlmostEqual(mapped_rates.eur_usd, eur_rates["USD"])
 
         print_live_exchange_snapshot(
             mapped_rates,

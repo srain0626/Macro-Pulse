@@ -3,6 +3,8 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
+from models import ReportFormatConfig, normalize_report_format_config
+
 
 DEFAULT_REPORT_FORMAT_CONFIG = "config/report_formats.json"
 
@@ -25,13 +27,13 @@ def resolve_report_format_config_path(config_path=None):
 def load_report_format_config(config_path=None):
     config_file = resolve_report_format_config_path(config_path)
     with config_file.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
+        return ReportFormatConfig.from_mapping(json.load(handle))
 
 
 def get_mode_format(mode, format_config=None):
     normalized_mode = (mode or "").strip().upper()
-    config = format_config or load_report_format_config()
-    modes = config.get("modes", {})
+    config = normalize_report_format_config(format_config or load_report_format_config())
+    modes = config.modes
 
     if normalized_mode not in modes:
         available_modes = ", ".join(sorted(modes))
@@ -43,4 +45,4 @@ def get_mode_format(mode, format_config=None):
 
 
 def get_screenshot_targets(mode, format_config=None):
-    return list(get_mode_format(mode, format_config).get("screenshot_targets", []))
+    return list(get_mode_format(mode, format_config).screenshot_targets)

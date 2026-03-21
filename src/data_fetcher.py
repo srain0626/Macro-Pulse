@@ -1,42 +1,50 @@
+import os
+import tempfile
+
 import yfinance as yf
-import pandas as pd
-import logging
-import numpy as np
+
 from cnbc_fetcher import fetch_cnbc_data
 from frankfurter_fetcher import fetch_frankfurter_rates
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+from logging_utils import get_logger
+from models import (
+    AssetSnapshot,
+    ReportDataset,
+    TickerDefinition,
+    ValueFormat,
+    coerce_cnbc_quote,
+    coerce_exchange_rates,
 )
+
+
+logger = get_logger(__name__)
 
 # Yahoo Tickers (default)
 YF_TICKERS = {
-    "indices_domestic": {
-        "KOSPI": "^KS11",
-        "KOSDAQ": "^KQ11",
-    },
-    "indices_overseas": {
-        "S&P 500": "^GSPC",
-        "Nasdaq": "^IXIC",
-        "Euro Stoxx 50": "^STOXX50E",
-        "Nikkei 225": "^N225",
-        "Hang Seng": "^HSI",  # Added
-        "Shanghai Composite": "000001.SS",
-    },
-    "commodities_rates": {
-        "Gold": "GC=F",
-        "Silver": "SI=F",
-        "Copper": "HG=F",
-        "US 10Y Treasury": "^TNX",
-    },
-    "crypto": {
-        "Bitcoin": "BTC-USD",
-        "Ethereum": "ETH-USD",
-    },
-    "volatility": {
-        "VIX": "^VIX",
-    },
+    "indices_domestic": (
+        TickerDefinition("KOSPI", "^KS11"),
+        TickerDefinition("KOSDAQ", "^KQ11"),
+    ),
+    "indices_overseas": (
+        TickerDefinition("S&P 500", "^GSPC"),
+        TickerDefinition("Nasdaq", "^IXIC"),
+        TickerDefinition("Euro Stoxx 50", "^STOXX50E"),
+        TickerDefinition("Nikkei 225", "^N225"),
+        TickerDefinition("Hang Seng", "^HSI"),
+        TickerDefinition("Shanghai Composite", "000001.SS"),
+    ),
+    "commodities_rates": (
+        TickerDefinition("Gold", "GC=F"),
+        TickerDefinition("Silver", "SI=F"),
+        TickerDefinition("Copper", "HG=F"),
+        TickerDefinition("US 10Y Treasury", "^TNX", value_format=ValueFormat.YIELD_3),
+    ),
+    "crypto": (
+        TickerDefinition("Bitcoin", "BTC-USD"),
+        TickerDefinition("Ethereum", "ETH-USD"),
+    ),
+    "volatility": (
+        TickerDefinition("VIX", "^VIX"),
+    ),
 }
 
 # YF Tickers for Exchange Rates History (Hybrid Approach)
@@ -54,8 +62,9 @@ CNBC_SYMBOLS = [
 ]
 
 
-def fetch_all_data():
-    results = {
+def fetch_all_data() -> ReportDataset:
+    _configure_runtime_cache()
+    results: ReportDataset = {
         "indices_domestic": [],
         "indices_overseas": [],
         "volatility": [],
@@ -66,43 +75,51 @@ def fetch_all_data():
 
     # 0. Fetch YF History for Rates (for Trend/Change)
     yf_rates_data = {}
-    logging.info("Fetching YF Rates History...")
+    logger.info("Fetching YF rates history...")
     for name, ticker in YF_RATES_HISTORY.items():
         try:
             hist = yf.Ticker(ticker).history(period="1mo")
             if not hist.empty:
                 yf_rates_data[name] = hist
         except Exception as e:
-            logging.error(f"Error fetching YF history for {name}: {e}")
+            logger.error("Error fetching YF history for %s: %s", name, e)
 
     # 1. Fetch CNBC Data
-    logging.info("Fetching CNBC data...")
+    logger.info("Fetching CNBC data...")
     cnbc_data = fetch_cnbc_data(CNBC_SYMBOLS)
 
     # 2. Fetch FX rates from Frankfurter
-    logging.info("Fetching Frankfurter FX data...")
-    fx_data = fetch_frankfurter_rates()
-    usd_krw = fx_data.get("USD/KRW")
-    usd_jpy = fx_data.get("USD/JPY")
-    eur_usd = fx_data.get("EUR/USD")
-    usd_cny = fx_data.get("USD/CNY")
+    logger.info("Fetching Frankfurter FX data...")
+    fx_data = coerce_exchange_rates(fetch_frankfurter_rates())
+    usd_krw = fx_data.usd_krw
+    usd_jpy = fx_data.usd_jpy
+    eur_usd = fx_data.eur_usd
+    usd_cny = fx_data.usd_cny
 
     # Helper to create result item
-    def create_item(name, price, change, change_pct, history=None, use_blank=False):
+    def create_item(
+        name,
+        price,
+        change,
+        change_pct,
+        history=None,
+        use_blank=False,
+        value_format=ValueFormat.STANDARD_2,
+    ):
         if use_blank:
             change = None
             change_pct = None
             history = []
 
-        sparkline = None  # Handled in report generator
-        return {
-            "name": name,
-            "price": price,
-            "change": change,
-            "change_pct": change_pct,
-            "history": history if history is not None else [price] if price else [],
-            "sparkline": sparkline,
-        }
+        normalized_history = history if history is not None else [price] if price else []
+        return AssetSnapshot(
+            name=name,
+            price=float(price) if price is not None else None,
+            change=float(change) if change is not None else None,
+            change_pct=float(change_pct) if change_pct is not None else None,
+            history=[float(value) for value in normalized_history],
+            value_format=value_format,
+        )
 
     # Exchange Rates Calculation
     if usd_krw:
@@ -177,47 +194,54 @@ def fetch_all_data():
             )
 
     else:
-        logging.warning("Frankfurter FX rates failed. Data might be incomplete.")
+        logger.warning("Frankfurter FX rates failed. Data might be incomplete.")
 
     # Add other CNBC items (Blank Change/Trend)
     # VKOSPI
     if ".KSVKOSPI" in cnbc_data:
-        item = cnbc_data[".KSVKOSPI"]
+        item = coerce_cnbc_quote(cnbc_data[".KSVKOSPI"])
         results["volatility"].append(
-            create_item("VKOSPI", item["price"], item["change"], item["change_pct"])
+            create_item("VKOSPI", item.price, item.change, item.change_pct)
         )
 
     # Japan 10Y
     if "JP10Y" in cnbc_data:
-        item = cnbc_data["JP10Y"]
+        item = coerce_cnbc_quote(cnbc_data["JP10Y"])
         results["commodities_rates"].append(
             create_item(
                 "Japan 10Y Treasury",
-                item["price"],
-                item["change"],
-                item["change_pct"],
+                item.price,
+                item.change,
+                item.change_pct,
+                value_format=ValueFormat.YIELD_3,
             )
         )
 
     # Korea 10Y
     if "KR10Y" in cnbc_data:
-        item = cnbc_data["KR10Y"]
+        item = coerce_cnbc_quote(cnbc_data["KR10Y"])
         results["commodities_rates"].append(
             create_item(
                 "Korea 10Y Treasury",
-                item["price"],
-                item["change"],
-                item["change_pct"],
+                item.price,
+                item.change,
+                item.change_pct,
+                value_format=ValueFormat.YIELD_3,
             )
         )
 
     # 3. Fetch Yahoo Finance Data
-    logging.info("Fetching Yahoo Finance data...")
+    logger.info("Fetching Yahoo Finance data...")
     for category, items in YF_TICKERS.items():
-        for name, ticker in items.items():
+        for definition in items:
             try:
-                data = yf.Ticker(ticker).history(period="1mo")
+                data = yf.Ticker(definition.symbol).history(period="1mo")
                 if data.empty:
+                    logger.warning(
+                        "Yahoo Finance returned no history for %s (%s)",
+                        definition.name,
+                        definition.symbol,
+                    )
                     continue
 
                 last_price = data["Close"].iloc[-1]
@@ -232,20 +256,20 @@ def fetch_all_data():
                     history = [last_price]
 
                 results[category].append(
-                    {
-                        "name": name,
-                        "ticker": ticker,
-                        "price": last_price,
-                        "change": change,
-                        "change_pct": change_pct,
-                        "history": history,
-                        "sparkline": None,  # Placeholder
-                        "dates": [d.strftime("%m-%d") for d in data.tail(7).index],
-                    }
+                    AssetSnapshot(
+                        name=definition.name,
+                        ticker=definition.symbol,
+                        price=float(last_price),
+                        change=float(change),
+                        change_pct=float(change_pct),
+                        history=[float(value) for value in history],
+                        dates=[d.strftime("%m-%d") for d in data.tail(7).index],
+                        value_format=definition.value_format,
+                    )
                 )
 
             except Exception as e:
-                logging.error(f"Error fetching YF {name}: {e}")
+                logger.error("Error fetching YF %s: %s", definition.name, e)
 
     # Reorder commodities_rates to ensure US 10Y is after Korea 10Y (Group Bonds)
     # Target Order: Japan 10Y, Korea 10Y, US 10Y, others...
@@ -253,10 +277,10 @@ def fetch_all_data():
 
     cr_list = results["commodities_rates"]
     us_10y_idx = next(
-        (i for i, x in enumerate(cr_list) if x["name"] == "US 10Y Treasury"), None
+        (i for i, x in enumerate(cr_list) if x.name == "US 10Y Treasury"), None
     )
     korea_10y_idx = next(
-        (i for i, x in enumerate(cr_list) if x["name"] == "Korea 10Y Treasury"), None
+        (i for i, x in enumerate(cr_list) if x.name == "Korea 10Y Treasury"), None
     )
 
     if us_10y_idx is not None and korea_10y_idx is not None:
@@ -264,7 +288,7 @@ def fetch_all_data():
         item = cr_list.pop(us_10y_idx)
         # Re-calculate index of Korea because pop might have shifted it if US was before (unlikely)
         korea_10y_idx = next(
-            (i for i, x in enumerate(cr_list) if x["name"] == "Korea 10Y Treasury"),
+            (i for i, x in enumerate(cr_list) if x.name == "Korea 10Y Treasury"),
             None,
         )
         if korea_10y_idx is not None:
@@ -272,7 +296,21 @@ def fetch_all_data():
         else:
             cr_list.append(item)  # Fallback
 
+    logger.info(
+        "Completed fetch cycle with %s populated categories",
+        sum(1 for items in results.values() if items),
+    )
+
     return results
+
+
+def _configure_runtime_cache() -> None:
+    cache_dir = os.environ.get(
+        "YFINANCE_CACHE_DIR", os.path.join(tempfile.gettempdir(), "macro-pulse-yfinance")
+    )
+    os.makedirs(cache_dir, exist_ok=True)
+    if hasattr(yf, "set_tz_cache_location"):
+        yf.set_tz_cache_location(cache_dir)
 
 
 if __name__ == "__main__":

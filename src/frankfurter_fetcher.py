@@ -1,8 +1,10 @@
 import json
-import logging
 from urllib.error import URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
+from logging_utils import get_logger
+from models import ExchangeRates
 
 
 FRANKFURTER_BASE_URL = "https://api.frankfurter.dev/v1/latest"
@@ -10,6 +12,8 @@ FRANKFURTER_HEADERS = {
     "User-Agent": "Macro-Pulse/1.0",
     "Accept": "application/json",
 }
+
+logger = get_logger(__name__)
 
 
 def build_frankfurter_latest_url(base, symbols):
@@ -48,12 +52,12 @@ def fetch_frankfurter_rates():
         usd_rates = usd_data.get("rates", {})
         eur_rates = eur_data.get("rates", {})
 
-        return {
-            "USD/KRW": usd_rates.get("KRW"),
-            "USD/JPY": usd_rates.get("JPY"),
-            "EUR/USD": eur_rates.get("USD"),
-            "USD/CNY": usd_rates.get("CNY"),
-        }
+        return ExchangeRates(
+            usd_krw=usd_rates.get("KRW"),
+            usd_jpy=usd_rates.get("JPY"),
+            eur_usd=eur_rates.get("USD"),
+            usd_cny=usd_rates.get("CNY"),
+        )
     except (URLError, TimeoutError, ValueError, OSError) as exc:
-        logging.error(f"Frankfurter API error: {exc}")
-        return {}
+        logger.error("Frankfurter API error: %s", exc)
+        return ExchangeRates()

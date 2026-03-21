@@ -1,12 +1,13 @@
 import argparse
 import asyncio
 import os
-import warnings
+from pathlib import Path
 from datetime import datetime, timezone
 
 from artifact_utils import cleanup_files
 from data_fetcher import fetch_all_data
 from dotenv import load_dotenv
+from logging_utils import configure_logging, get_logger
 from notifier import send_email_report, send_telegram_report
 from report_format_config import get_screenshot_targets, load_report_format_config
 from report_generator import generate_html_report, generate_telegram_summary
@@ -18,9 +19,9 @@ from screenshot_utils import (
 
 # Load .env file
 load_dotenv()
+configure_logging()
 
-# Suppress warnings
-warnings.filterwarnings("ignore")
+logger = get_logger(__name__)
 
 
 SCREENSHOT_HANDLERS = {
@@ -40,7 +41,7 @@ def resolve_mode(market_arg, now_utc=None):
     return "KR" if 7 <= hour < 20 else "US"
 
 
-async def main():
+def build_parser():
     parser = argparse.ArgumentParser(description="Macro Pulse Bot")
     parser.add_argument(
         "--dry-run", action="store_true", help="Generate report but do not send"
@@ -51,40 +52,42 @@ async def main():
         default="Global",
         help="Market context override (KR/US). Global uses time-based auto mode.",
     )
-    args = parser.parse_args()
+    return parser
+
+
+async def main(argv=None):
+    args = build_parser().parse_args(argv)
 
     mode = resolve_mode(args.market)
     report_format_config = load_report_format_config()
 
-    print(f"Starting Macro Pulse Bot (Mode: {mode})...")
+    logger.info("Starting Macro Pulse Bot (mode=%s)", mode)
 
-    print("Fetching data...")
     data = fetch_all_data()
 
-    print("Generating report...")
     html_report = generate_html_report(data)
 
     telegram_summary = generate_telegram_summary(data, mode, report_format_config)
-    print(f"Telegram Summary ({mode}):\n{telegram_summary}\n")
+    logger.info("Telegram Summary (%s):\n%s\n", mode, telegram_summary)
 
-    output_path = "macro_pulse_report.html"
-    with open(output_path, "w", encoding="utf-8") as handle:
+    output_path = Path("macro_pulse_report.html")
+    with output_path.open("w", encoding="utf-8") as handle:
         handle.write(html_report)
-    print(f"Report saved to {output_path}")
+    logger.info("Report saved to %s", output_path)
 
     if args.dry_run:
-        print("Dry run complete. No notifications sent.")
-        return
+        logger.info("Dry run complete. No notifications sent.")
+        return 0
 
     screenshot_paths = []
     screenshot_targets = get_screenshot_targets(mode, report_format_config)
     if screenshot_targets:
-        print(f"Taking screenshots for targets: {', '.join(screenshot_targets)}")
+        logger.info("Taking screenshots for targets: %s", ", ".join(screenshot_targets))
 
     for target in screenshot_targets:
         take_screenshot = SCREENSHOT_HANDLERS.get(target)
         if not take_screenshot:
-            print(f"Unknown screenshot target in config: {target}")
+            logger.warning("Unknown screenshot target in config: %s", target)
             continue
 
         screenshot_path = take_screenshot()
@@ -112,6 +115,8 @@ async def main():
     finally:
         cleanup_files(screenshot_paths)
 
+    return 0
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    raise SystemExit(asyncio.run(main()))

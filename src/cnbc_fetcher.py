@@ -1,4 +1,3 @@
-import logging
 import re
 import time
 from html import unescape
@@ -6,10 +5,11 @@ from html.parser import HTMLParser
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+from logging_utils import get_logger
+from models import CnbcQuote
+
+
+logger = get_logger(__name__)
 
 CNBC_QUOTES = {
     ".KSVKOSPI": {
@@ -169,11 +169,7 @@ def parse_cnbc_quote(html):
         previous_close = price - change
         change_pct = (change / previous_close) * 100 if previous_close else 0.0
 
-    return {
-        "price": price,
-        "change": change,
-        "change_pct": change_pct,
-    }
+    return CnbcQuote(price=price, change=change, change_pct=change_pct)
 
 
 def fetch_cnbc_quote(symbol, attempts=3, retry_delay=1):
@@ -188,8 +184,12 @@ def fetch_cnbc_quote(symbol, attempts=3, retry_delay=1):
             with urlopen(request, timeout=15) as response:
                 html = response.read().decode("utf-8", "ignore")
             parsed = parse_cnbc_quote(html)
-            parsed["name"] = quote["name"]
-            return parsed
+            return CnbcQuote(
+                name=quote["name"],
+                price=parsed.price,
+                change=parsed.change,
+                change_pct=parsed.change_pct,
+            )
         except (HTTPError, URLError, TimeoutError) as exc:
             last_error = exc
             if attempt == attempts:
@@ -209,14 +209,14 @@ def fetch_cnbc_data(symbols):
 
     for symbol in symbols:
         if symbol not in CNBC_QUOTES:
-            logging.warning(f"Unsupported CNBC symbol requested: {symbol}")
+            logger.warning("Unsupported CNBC symbol requested: %s", symbol)
             continue
 
         try:
             results[symbol] = fetch_cnbc_quote(symbol)
         except (HTTPError, URLError, TimeoutError, ValueError) as exc:
-            logging.error(f"Failed to fetch CNBC quote for {symbol}: {exc}")
+            logger.error("Failed to fetch CNBC quote for %s: %s", symbol, exc)
         except Exception as exc:
-            logging.error(f"Unexpected CNBC fetch error for {symbol}: {exc}")
+            logger.exception("Unexpected CNBC fetch error for %s", symbol)
 
     return results

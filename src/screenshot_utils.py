@@ -1,13 +1,32 @@
+import os
+import shutil
 import time
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service as ChromeService
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.chrome.options import Options
 
 from artifact_utils import resolve_output_path
+from logging_utils import get_logger
+
+try:
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.chrome.service import Service as ChromeService
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.webdriver.support.ui import WebDriverWait
+except ImportError:  # pragma: no cover - exercised in environments without selenium
+    webdriver = None
+    Options = None
+    ChromeService = None
+    By = None
+    EC = None
+    WebDriverWait = None
+
+try:
+    from webdriver_manager.chrome import ChromeDriverManager
+except ImportError:  # pragma: no cover - exercised in environments without webdriver-manager
+    ChromeDriverManager = None
+
+
+logger = get_logger(__name__)
 
 
 MARKETMAP_URLS = {
@@ -28,6 +47,12 @@ MARKETMAP_SVG_SELECTOR = "svg.anychart-ui-support"
 
 
 def get_chrome_driver():
+    if webdriver is None or Options is None or ChromeService is None:
+        logger.warning(
+            "Selenium runtime is unavailable. Install selenium and webdriver-manager to enable screenshots."
+        )
+        return None
+
     chrome_options = Options()
     chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--no-sandbox")
@@ -40,13 +65,16 @@ def get_chrome_driver():
         "user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     )
     chrome_options.set_capability("pageLoadStrategy", "eager")
+    chrome_binary = _resolve_chrome_binary()
+    if chrome_binary:
+        chrome_options.binary_location = chrome_binary
 
     try:
-        service = ChromeService(ChromeDriverManager().install())
+        service = ChromeService(_resolve_chromedriver_binary())
         driver = webdriver.Chrome(service=service, options=chrome_options)
         return driver
     except Exception as e:
-        print(f"Failed to initialize Chrome Driver: {e}")
+        logger.error("Failed to initialize Chrome Driver: %s", e)
         return None
 
 
@@ -56,7 +84,7 @@ def wait_for_first_visible(driver, selectors, timeout=20):
 
     for selector in selectors:
         try:
-            print(f"Waiting for selector: {selector}")
+            logger.info("Waiting for selector: %s", selector)
             return wait.until(
                 EC.visibility_of_element_located((By.CSS_SELECTOR, selector))
             )
@@ -85,7 +113,7 @@ def resize_window_for_element(driver, element, min_width=1600, padding=120):
 
     width = max(min_width, dimensions["width"] + 40)
     height = max(1200, dimensions["height"] + padding)
-    print(f"Resizing window to {width}x{height} for element capture...")
+    logger.info("Resizing window to %sx%s for element capture...", width, height)
     driver.set_window_size(width, height)
     driver.execute_script(
         "arguments[0].scrollIntoView({block: 'start', inline: 'nearest'});", element
@@ -99,7 +127,7 @@ def wait_for_marketmap_svg(driver, timeout=40):
 
     for selector in MARKETMAP_WRAPPER_SELECTORS:
         try:
-            print(f"Waiting for rendered SVG in: {selector}")
+            logger.info("Waiting for rendered SVG in: %s", selector)
 
             def svg_ready(_driver):
                 wrapper = _driver.find_element(By.CSS_SELECTOR, selector)
@@ -167,30 +195,27 @@ def take_finviz_screenshot(output_path=None):
     try:
         output_path = resolve_output_path(output_path, "finviz_map")
         url = "https://finviz.com/map.ashx"
-        print(f"Navigating to {url}...")
+        logger.info("Navigating to %s...", url)
         driver.get(url)
 
         # Wait for the map to load
-        print("Waiting for map element...")
+        logger.info("Waiting for map element...")
         wait = WebDriverWait(driver, 20)
         element = wait.until(
             EC.visibility_of_element_located((By.ID, "canvas-wrapper"))
         )
 
         # Add delay to ensure canvas is rendered
-        print("Waiting for canvas to render...")
+        logger.info("Waiting for canvas to render...")
         time.sleep(5)
 
         # Take screenshot of the element
         element.screenshot(output_path)
-        print(f"Screenshot saved to {output_path}")
+        logger.info("Screenshot saved to %s", output_path)
         return output_path
 
     except Exception as e:
-        import traceback
-
-        traceback.print_exc()
-        print(f"Failed to take screenshot: {e}")
+        logger.exception("Failed to take screenshot: %s", e)
         return None
     finally:
         if "driver" in locals() and driver:
@@ -224,7 +249,7 @@ def take_hankyung_marketmap_screenshot(market, output_path):
         url = MARKETMAP_URLS[market]
 
         for attempt in range(2):
-            print(f"Navigating to {url}... (attempt {attempt + 1})")
+            logger.info("Navigating to %s... (attempt %s)", url, attempt + 1)
             driver.get(url)
             WebDriverWait(driver, 30).until(
                 lambda current_driver: current_driver.execute_script(
@@ -234,26 +259,49 @@ def take_hankyung_marketmap_screenshot(market, output_path):
             )
 
             try:
-                print("Waiting for chart SVG to render...")
+                logger.info("Waiting for chart SVG to render...")
                 svg = wait_for_marketmap_svg(driver, timeout=40)
                 resize_window_for_element(driver, svg, min_width=1800, padding=240)
                 svg = wait_for_marketmap_svg(driver, timeout=20)
                 position_element_for_capture(driver, svg, top_offset=180)
                 time.sleep(3)
                 svg.screenshot(output_path)
-                print(f"Screenshot saved to {output_path}")
+                logger.info("Screenshot saved to %s", output_path)
                 return output_path
             except Exception as exc:
-                print(f"Capture attempt {attempt + 1} failed: {exc}")
+                logger.warning("Capture attempt %s failed: %s", attempt + 1, exc)
                 if attempt == 1:
                     raise
 
     except Exception as e:
-        import traceback
-
-        traceback.print_exc()
-        print(f"Failed to take {market.upper()} screenshot: {e}")
+        logger.exception("Failed to take %s screenshot: %s", market.upper(), e)
         return None
     finally:
         if "driver" in locals() and driver:
             driver.quit()
+
+
+def _resolve_chrome_binary():
+    return (
+        os.environ.get("CHROME_BIN")
+        or shutil.which("chromium")
+        or shutil.which("chromium-browser")
+        or shutil.which("google-chrome")
+        or shutil.which("google-chrome-stable")
+    )
+
+
+def _resolve_chromedriver_binary():
+    if os.environ.get("CHROMEDRIVER_BIN"):
+        return os.environ["CHROMEDRIVER_BIN"]
+
+    local_binary = shutil.which("chromedriver")
+    if local_binary:
+        return local_binary
+
+    if ChromeDriverManager is None:
+        raise RuntimeError(
+            "No chromedriver binary found and webdriver-manager is not installed."
+        )
+
+    return ChromeDriverManager().install()

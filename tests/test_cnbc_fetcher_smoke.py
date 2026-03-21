@@ -22,13 +22,13 @@ class CnbcFetcherSmokeTests(unittest.TestCase):
         print("\nCNBC live quotes:")
         for symbol in symbols:
             quote = quotes[symbol]
-            self.assertGreater(quote["price"], 0)
-            self.assertIsNotNone(quote["change"])
-            self.assertIsNotNone(quote["change_pct"])
+            self.assertGreater(quote.price, 0)
+            self.assertIsNotNone(quote.change)
+            self.assertIsNotNone(quote.change_pct)
             print(
-                f"{symbol}: price={quote['price']:.3f}, "
-                f"change={quote['change']:+.3f}, "
-                f"change_pct={quote['change_pct']:+.2f}%"
+                f"{symbol}: price={quote.price:.3f}, "
+                f"change={quote.change:+.3f}, "
+                f"change_pct={quote.change_pct:+.2f}%"
             )
 
 

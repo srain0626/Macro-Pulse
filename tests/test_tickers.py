@@ -1,80 +1,44 @@
-import yfinance as yf
-import sys
 import os
-import logging
-from dotenv import load_dotenv
+import sys
+import unittest
 
-# Configure logging to stdout
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    stream=sys.stdout,
-)
+import yfinance as yf
 
-load_dotenv()
 
-# Add src to path to import project modules
 sys.path.append(os.path.join(os.path.dirname(__file__), "../src"))
-from cnbc_fetcher import fetch_cnbc_data
+
+from cnbc_fetcher import CNBC_QUOTES, fetch_cnbc_data
+from data_fetcher import YF_TICKERS
 from frankfurter_fetcher import fetch_frankfurter_rates
 
-yf_tickers = {
-    "S&P 500": "^GSPC",
-    "Nasdaq": "^IXIC",
-    "Nikkei 225": "^N225",
-    "Euro Stoxx 50": "^STOXX50E",
-    "Shanghai Composite": "000001.SS",
-    "KOSPI": "^KS11",
-    "KOSDAQ": "^KQ11",
-    "Gold": "GC=F",
-    "US 10Y": "^TNX",
-    "Bitcoin": "BTC-USD",
-    "VIX": "^VIX",
-}
 
-cnbc_symbols = [".KSVKOSPI", "JP10Y", "KR10Y"]
+@unittest.skipUnless(
+    os.environ.get("RUN_LIVE_SMOKE_TESTS") == "1",
+    "Set RUN_LIVE_SMOKE_TESTS=1 to hit live market data sources.",
+)
+class ProviderSmokeTests(unittest.TestCase):
+    def test_yahoo_finance_tickers_return_recent_close(self):
+        for definitions in YF_TICKERS.values():
+            for definition in definitions:
+                with self.subTest(symbol=definition.symbol):
+                    history = yf.Ticker(definition.symbol).history(period="1d")
+                    self.assertFalse(history.empty)
+                    self.assertGreater(float(history["Close"].iloc[-1]), 0)
 
-print("--- Testing Yahoo Finance Tickers ---")
-for name, ticker in yf_tickers.items():
-    try:
-        data = yf.Ticker(ticker).history(period="1d")
-        if not data.empty:
-            print(f"[OK] {name} ({ticker}): {data['Close'].iloc[-1]}")
-        else:
-            print(f"[FAIL] {name} ({ticker}): No data")
-    except Exception as e:
-        print(f"[ERROR] {name} ({ticker}): {e}")
+    def test_frankfurter_returns_expected_pairs(self):
+        rates = fetch_frankfurter_rates()
+        self.assertGreater(rates.usd_krw or 0, 0)
+        self.assertGreater(rates.usd_jpy or 0, 0)
+        self.assertGreater(rates.eur_usd or 0, 0)
+        self.assertGreater(rates.usd_cny or 0, 0)
 
-print("\n--- Testing Frankfurter FX Rates ---")
+    def test_cnbc_returns_all_supported_symbols(self):
+        quotes = fetch_cnbc_data(list(CNBC_QUOTES))
+        self.assertEqual(set(quotes), set(CNBC_QUOTES))
+        for symbol, quote in quotes.items():
+            with self.subTest(symbol=symbol):
+                self.assertGreater(quote.price, 0)
 
-try:
-    fx_data = fetch_frankfurter_rates()
-    for pair in ["USD/KRW", "USD/JPY", "EUR/USD", "USD/CNY"]:
-        price = fx_data.get(pair)
-        if price:
-            print(f"[OK] {pair}: {price}")
-        else:
-            print(f"[FAIL] {pair}: No data found")
-except Exception as e:
-    print(f"[ERROR] Frankfurter fetch failed: {e}")
 
-print("\n--- Testing CNBC Tickers ---")
-
-try:
-    cnbc_data = fetch_cnbc_data(cnbc_symbols)
-    if not cnbc_data:
-        print("[FAIL] No data returned from CNBC Fetcher")
-    else:
-        for symbol in cnbc_symbols:
-            data = cnbc_data.get(symbol)
-            if data:
-                print(
-                    "[OK] "
-                    f"{data.get('name', symbol)} ({symbol}): "
-                    f"{data.get('price')} ({data.get('change'):+})"
-                )
-            else:
-                print(f"[FAIL] {symbol}: No data found")
-
-except Exception as e:
-    print(f"[ERROR] CNBC Fetcher failed: {e}")
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
